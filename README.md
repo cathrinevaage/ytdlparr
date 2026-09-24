@@ -153,7 +153,7 @@ named category to Sonarr.
 ```yaml
 paths:
   incomplete: /config/Downloads/incomplete   # under the config mount
-  complete: /downloads/complete              # final library storage
+  complete: /config/Downloads/complete       # production: the library Sonarr sees
 schedule:
   timezone: UTC                       # defaults to $TZ when set
   download:
@@ -233,9 +233,10 @@ services:
 
 - `user:` is how the container runs as your media user; the image has
   no PUID/PGID handling. `/config` must be writable by that uid.
-- `paths.complete` must be visible to Sonarr at the same path, or
-  mapped with a remote path mapping - exactly as with SAB. Mounting
-  the same library volume Sonarr mounts is the simplest way.
+- `paths.complete` defaults to `/config/Downloads/complete`, like SAB.
+  In production point it at storage Sonarr sees at the same path (the
+  compose above does, via `YTDLPARR_PATHS_COMPLETE`), or add a remote
+  path mapping - exactly as with SAB.
 - `paths.incomplete` defaults to `/config/Downloads/incomplete` - under
   the config mount, as SAB does it - so in-flight and waiting jobs
   survive a recreate without a mount of their own. Point it elsewhere

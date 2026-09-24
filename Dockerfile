@@ -15,10 +15,9 @@ RUN apk add --no-cache ffmpeg python3 py3-pip tzdata \
 WORKDIR /app
 COPY ytdlparr ./ytdlparr
 
-# /downloads is not a VOLUME: that would spawn an anonymous volume per
-# recreate. Incomplete files live under /config by default (SAB's
-# convention), so nothing needs mounting for them.
-RUN mkdir -p /downloads/complete && chmod 0777 /downloads /downloads/complete
+# Both download dirs default to /config/Downloads, SAB's convention, so
+# nothing beyond /config needs mounting to run; production points
+# paths.complete at the library Sonarr also sees.
 
 ENV YTDLPARR_CONFIG=/config/config.yml
 VOLUME ["/config"]

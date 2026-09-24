@@ -18,7 +18,7 @@ DEFAULTS = {
     },
     "paths": {
         "incomplete": "/config/Downloads/incomplete",   # SAB's convention: under config
-        "complete": "/downloads/complete",
+        "complete": "/config/Downloads/complete",
         "state": "/config/jobs.json",
     },
     "limits": {

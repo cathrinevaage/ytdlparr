@@ -6,7 +6,7 @@ server:
 
 paths:
   incomplete: /config/Downloads/incomplete   # under the config mount, like SAB
-  complete: /downloads/complete              # final library storage
+  complete: /config/Downloads/complete       # set to the library Sonarr also sees in production
   state: /config/jobs.json
 
 limits:
