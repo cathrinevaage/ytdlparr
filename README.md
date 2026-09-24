@@ -27,32 +27,80 @@ run through a `nice`/`ionice` wrapper.
 
 ## The job spec
 
-What an indexer puts in the NZB. Only `url` and `name` are required;
-everything else overrides the category's options.
+What an indexer puts in the NZB. Two shapes are accepted.
+
+### Tracks mode
+
+The indexer names every stream of the output. It says *what* - a URL
+and a yt-dlp selector (or a direct subtitle URL) per track, plus the
+title, language and flags each stream should carry - and knows the
+site. ytdlparr does *how* - fetch each track, mux in order, tag - and
+knows no site.
 
 ```json
 {
   "url": "https://example.com/watch/abc123",
   "name": "Show - S01E01 - Pilot",
-  "format": "bestvideo[height<=1080]+bestaudio/best",
-  "subs": ["en"],
-  "embed": ["subs", "chapters", "thumbnail", "metadata"],
-  "sidecar": [],
-  "sponsorblock": [],
-  "container": "mkv"
+  "container": "mkv",
+
+  "video": { "format": "bestvideo[height<=1080]" },
+
+  "audio": [
+    { "format": "bestaudio[format_id^=aud3]", "title": "Surround 5.1", "language": "eng",
+      "flags": ["default"], "optional": true },
+    { "format": "bestaudio[format_id^=aud2]", "title": "Stereo", "language": "eng" },
+    { "url": "https://example.com/watch/abc123-described",
+      "format": "bestaudio", "title": "Audio description", "language": "eng",
+      "flags": ["visual_impaired"], "optional": true }
+  ],
+
+  "subtitles": [
+    { "url": "https://cdn.example.com/.../s0_index.m3u8", "title": "English", "language": "eng", "flags": ["default"] },
+    { "url": "https://cdn.example.com/.../s1_index.m3u8", "title": "English (forced)", "language": "eng", "flags": ["forced"] },
+    { "select": "en-sdh", "title": "English SDH", "language": "eng", "flags": ["hearing_impaired"] }
+  ],
+
+  "embed": ["chapters", "thumbnail", "metadata"],
+  "sidecar": []
 }
 ```
 
 | key | meaning |
 |---|---|
-| `url` | anything yt-dlp's extractors accept |
-| `name` | the folder and file name written; Sonarr's `nzbname` overrides it |
-| `format` | yt-dlp format selector |
-| `subs` | subtitle languages, or `["all"]` |
-| `embed` | any of `subs`, `chapters`, `thumbnail`, `metadata` |
-| `sidecar` | of `subs`, `thumbnail`: also keep the file next to the video |
-| `sponsorblock` | SponsorBlock categories to cut |
-| `container` | merge output format |
+| `url`, `name`, `container` | as before; `name` is the folder and file name written, `nzbname` from Sonarr overrides it |
+| `video.format` | yt-dlp selector for the video stream (video-only or muxed; if muxed and there are no `audio` entries, its own audio is kept) |
+| `audio[]` | one entry per audio stream, in output order |
+| `subtitles[]` | one entry per subtitle stream, in output order |
+| `url` on a track | another source; defaults to the spec's `url`. ytdlparr fetches only that selector from it |
+| `format` | yt-dlp format selector for a video or audio track |
+| `select` | yt-dlp subtitle key, fetched as a subtitles-only run |
+| `url` on a subtitle | an HLS subtitle playlist or a VTT/SRT file, fetched with ffmpeg |
+| `title`, `language` | written to the stream; `language` is an ISO 639-2 tag |
+| `flags` | ffmpeg disposition names, verbatim: `default`, `forced`, `hearing_impaired`, `visual_impaired`, `commentary`, `original`, `dub` |
+| `optional` | take it if the selector matches, skip silently if not; a required track that matches nothing fails the attempt |
+| `embed` | any of `chapters`, `thumbnail`, `metadata`; subtitles are always embedded in tracks mode |
+| `sidecar` | `subs` keeps each subtitle as `<name>.<lang>[.forced][.sdh].srt` too; `thumbnail` keeps the image |
+
+Every track is its own yt-dlp (or ffmpeg) run, so an optional track
+that matches nothing costs one failed selection and nothing else. The
+video run carries the chapters/metadata postprocessors and the
+thumbnail; then one ffmpeg pass stream-copies everything into the
+container with titles, languages and dispositions, in the order the
+lists gave.
+
+### Legacy mode
+
+A spec with `format` and `subs` and none of `video`/`audio`/`subtitles`
+runs as a single yt-dlp job with embedding left to yt-dlp:
+
+```json
+{ "url": "…", "name": "…", "format": "bestvideo[height<=1080]+bestaudio/best",
+  "subs": ["en"], "embed": ["subs", "chapters", "thumbnail", "metadata"], "container": "mkv" }
+```
+
+Category options fill in whatever the spec leaves out in legacy mode;
+in tracks mode the spec is authoritative and the category contributes
+`dir`, `container`, `embed` and `sidecar` only.
 
 Carried as:
 
@@ -62,10 +110,13 @@ Carried as:
     <meta type="name">Show - S01E01 - Pilot</meta>
     <meta type="ytdlpspec">{ ...json... }</meta>
   </head>
+  <file poster="…" date="…" subject="…"><segments><segment …/></segments></file>
 </nzb>
 ```
 
-A real NZB, or anything without that meta tag, is refused at `addfile`.
+Sonarr's NZB validation requires a `<file>` element; the indexer
+includes a placeholder. Anything without the `ytdlpspec` meta tag is
+refused at `addfile`.
 
 ## Configuration
 
