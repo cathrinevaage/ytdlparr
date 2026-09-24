@@ -140,6 +140,23 @@ queue.
 Cookies live on the client keyed by host, never in the spec: one place
 to refresh, and the indexer never touches a secret.
 
+### Environment overrides
+
+Any scalar or list setting can be set from the environment as
+`YTDLPARR_<SECTION>_<KEY>`, which wins over the file. The value is
+typed from the setting it replaces; lists split on commas.
+
+```
+YTDLPARR_SERVER_API_KEY=...
+YTDLPARR_PATHS_COMPLETE=/data/downloads/ytdlparr
+YTDLPARR_LIMITS_MAX_CONCURRENT=4
+YTDLPARR_SCHEDULE_TIMEZONE=Europe/Berlin     # otherwise $TZ, otherwise UTC
+```
+
+Tables and lists of tables - `categories`, `cookies`, the `schedule`
+windows - are file-only. Unknown names are ignored rather than
+creating a setting nothing reads.
+
 ## Setup
 
 ### Compose
