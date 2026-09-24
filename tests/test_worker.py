@@ -75,3 +75,26 @@ class GateTest(unittest.TestCase):
 
         self.assertEqual(a.state, jobs.QUEUED)
         self.assertEqual(b.state, jobs.WAITING_TO_MOVE)
+
+
+class GuardTest(unittest.TestCase):
+    """A failing gate must not end a worker thread."""
+
+    def setUp(self):
+        self.harness = Harness(schedule={"timezone": "Not/AZone", "download": [
+            {"days": ["mon"], "from": "00:00", "to": "24:00"}], "move": []})
+
+    def tearDown(self):
+        self.harness.close()
+
+    def test_bad_timezone_is_logged_not_fatal(self):
+        self.harness.addfile()
+
+        with self.assertLogs("ytdlparr.worker", level="ERROR") as logged:
+            ran = self.harness.worker.guarded(self.harness.worker.download_tick)
+
+        self.assertFalse(ran)
+        self.assertIn("poll failed", logged.output[0])
+
+    def test_a_clean_tick_reports_whether_it_ran_a_job(self):
+        self.assertFalse(self.harness.worker.guarded(self.harness.worker.move_tick))

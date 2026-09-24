@@ -137,22 +137,36 @@ class Worker:
 
     def download_loop(self):
         while not self.stopping.is_set():
-            job = None
-
-            with self.store.lock:
-                job = self.next_download()
-
-                if job is not None and not self.room_for("incomplete", job):
-                    if job.state == jobs.DOWNLOADING:
-                        self.store.update(job.id, state=jobs.QUEUED)
-
-                    job = None
-
-            if job is None:
+            if not self.guarded(self.download_tick):
                 time.sleep(POLL_SECONDS)
-                continue
 
-            self.run_download(job)
+    def guarded(self, tick):
+        """One poll iteration. A bug in a gate - a bad timezone name, a
+        path that cannot be statted - must log and retry, never end the
+        thread while the API keeps answering as if nothing happened."""
+        try:
+            return tick()
+        except Exception:
+            log.exception("%s: poll failed", threading.current_thread().name)
+            return False
+
+    def download_tick(self):
+        """Claim and run one job. True when a job ran."""
+        with self.store.lock:
+            job = self.next_download()
+
+            if job is not None and not self.room_for("incomplete", job):
+                if job.state == jobs.DOWNLOADING:
+                    self.store.update(job.id, state=jobs.QUEUED)
+
+                job = None
+
+        if job is None:
+            return False
+
+        self.run_download(job)
+
+        return True
 
     def run_download(self, job):
         log.info("downloading %s", job.name)
@@ -175,14 +189,19 @@ class Worker:
 
     def move_loop(self):
         while not self.stopping.is_set():
-            job = self.next_move()
-
-            if job is None:
+            if not self.guarded(self.move_tick):
                 time.sleep(POLL_SECONDS)
-                continue
 
-            log.info("moving %s", job.name)
-            self.pipeline.move(job)
+    def move_tick(self):
+        job = self.next_move()
+
+        if job is None:
+            return False
+
+        log.info("moving %s", job.name)
+        self.pipeline.move(job)
+
+        return True
 
     def next_move(self):
         with self.store.lock:
