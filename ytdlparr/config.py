@@ -1,10 +1,13 @@
 """Configuration: operational only. What to download comes from the
 job spec; this says where things go, how many at once, and when."""
 
+import os
 from copy import deepcopy
 from pathlib import Path
 
 import yaml
+
+from . import env
 
 DEFAULTS = {
     "server": {
@@ -33,7 +36,7 @@ DEFAULTS = {
         "on_low_space": "fail",
     },
     "schedule": {
-        "timezone": "UTC",
+        "timezone": os.environ.get("TZ", "UTC"),
         "download": [
             {"days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
              "from": "00:00", "to": "24:00"},
@@ -87,12 +90,11 @@ def merge(base, override):
 
 
 def load(path):
+    """Defaults, then the YAML file, then environment overrides."""
     source = Path(path)
+    from_file = yaml.safe_load(source.read_text()) if source.exists() else {}
 
-    if not source.exists():
-        return deepcopy(DEFAULTS)
-
-    return merge(DEFAULTS, yaml.safe_load(source.read_text()))
+    return env.apply(merge(DEFAULTS, from_file))
 
 
 def parse_size(text):
