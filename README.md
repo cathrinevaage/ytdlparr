@@ -166,28 +166,98 @@ services:
   ytdlparr:
     image: ghcr.io/cathrinevaage/ytdlparr:latest
     container_name: ytdlparr
-    restart: unless-stopped
+    user: ${PUID}:${PGID}
+    environment:
+      - TZ=${TZ}
+      - YTDLPARR_SERVER_API_KEY=${YTDLPARR_API_KEY}
+      - YTDLPARR_PATHS_COMPLETE=/data/downloads/ytdlparr
+      - YTDLPARR_PATHS_STATE=/config/jobs.json
     ports:
       - "9120:9120"
     volumes:
       - ./ytdlparr:/config
-      - /fast/incomplete:/downloads/incomplete
-      - /library/complete:/downloads/complete
+      - /path/to/library:/data
+    restart: unless-stopped
 ```
 
-The `complete` mount must be visible to Sonarr at the same path, or
-mapped with a remote path mapping - exactly as with SAB.
+- `user:` is how the container runs as your media user; the image has
+  no PUID/PGID handling. `/config` must be writable by that uid.
+- `paths.complete` must be visible to Sonarr at the same path, or
+  mapped with a remote path mapping - exactly as with SAB. Mounting
+  the same library volume Sonarr mounts is the simplest way.
+- `paths.incomplete` defaults to `/downloads/incomplete` inside the
+  container and is left in the container's own layer, which is on the
+  host's disk. Anything mid-download or waiting for its move window is
+  lost when the container is recreated - and watchtower recreates it
+  on every image update; on restart the worker requeues those jobs.
+  Mount a host directory there if you'd rather keep them.
+- The config file is `/config/config.yml`. It is needed for anything
+  that is a table - categories, schedule windows, cookies - because
+  those cannot come from the environment. A minimal one:
+
+  ```yaml
+  categories:
+    tv-example:
+      dir: tv
+      format: "bestvideo[height<=1080]+bestaudio/best"
+      subs: [en]
+  ```
 
 ### Sonarr / Radarr
+
+Download clients are configured in Sonarr and Radarr directly.
+Prowlarr does not sync them - its own download-client list serves
+grabs made from Prowlarr's UI, nothing else.
 
 Settings → Download Clients → Add → SABnzbd:
 
 | field | value |
 |---|---|
 | Host / Port | `ytdlparr` / `9120` |
-| API Key | `server.api_key` |
+| API Key | `YTDLPARR_API_KEY` |
 | Category | one of your named categories, e.g. `tv-example` |
 | Client Priority | lower than your real usenet client (higher number) |
+
+The category test asks `get_config` for the list and matches by name.
+ytdlparr advertises exactly what `config.yml` declares - it does not
+create categories on the fly the way SAB does - so "Category does not
+exist" means the file is missing, unreadable, or does not name it.
+What is advertised right now:
+
+```sh
+docker compose exec ytdlparr sh -c 'wget -qO- "http://127.0.0.1:9120/api?mode=get_config&apikey=$YTDLPARR_SERVER_API_KEY&output=json"' | jq -c '[.config.categories[].name]'
+```
+
+(`127.0.0.1`, not `localhost`: on an IPv6-enabled compose network
+`localhost` resolves to `::1` first and the app listens on IPv4.)
+
+Releases reach ytdlparr because of a **custom format** that scores the
+indexer's release group in every quality profile - that lives with
+the indexer, see [nrkarr's README](https://github.com/cathrinevaage/nrkarr#custom-format-and-score).
+
+### Checking it
+
+The queue and history exactly as Sonarr reads them:
+
+```sh
+docker compose exec ytdlparr sh -c 'wget -qO- "http://127.0.0.1:9120/api?mode=queue&apikey=$YTDLPARR_SERVER_API_KEY&output=json"' | jq -c '.queue.slots[] | {status, percentage, mb, timeleft, filename}'
+docker compose exec ytdlparr sh -c 'wget -qO- "http://127.0.0.1:9120/api?mode=history&apikey=$YTDLPARR_SERVER_API_KEY&output=json"' | jq -c '.history.slots[] | {status, storage, fail_message, name}'
+```
+
+A healthy job in the log:
+
+```
+INFO ytdlparr.app: queued Show - S01E01 - Pilot [tv-example]
+INFO ytdlparr.worker: downloading Show - S01E01 - Pilot
+INFO ytdlparr.worker: moving Show - S01E01 - Pilot
+```
+
+Between `downloading` and `moving` the job shows as *Extracting* in
+Sonarr while ffmpeg muxes; then it waits for the move window if one
+is configured, and then it appears in history with its `storage`
+path. A failed attempt logs the reason from yt-dlp and the retry
+delay; after `limits.retries` the job is *Failed* with that reason as
+its `fail_message`.
 
 ### Routing: only job specs must reach ytdlparr
 
