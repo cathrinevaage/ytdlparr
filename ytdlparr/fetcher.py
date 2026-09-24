@@ -129,6 +129,71 @@ def build_options(spec, options, limits, cookies, work_dir, ffmpeg_dir=None):
     return params
 
 
+def base_options(url, limits, cookies, ffmpeg_dir=None):
+    """What every yt-dlp run gets, whichever track it fetches."""
+    params = {
+        "retries": limits["retries"],
+        "fragment_retries": limits["retries"],
+        "continuedl": True,
+        "noprogress": True,
+        "quiet": True,
+        "no_warnings": False,
+        "logger": log,
+        "restrictfilenames": False,
+        "windowsfilenames": False,
+        "overwrites": True,
+    }
+
+    rate = parse_rate(limits.get("rate_limit"))
+
+    if rate:
+        params["ratelimit"] = rate
+
+    cookie_file = cookie_file_for(url, cookies)
+
+    if cookie_file:
+        params["cookiefile"] = cookie_file
+
+    if ffmpeg_dir:
+        params["ffmpeg_location"] = str(ffmpeg_dir)
+
+    return params
+
+
+def build_track_options(track, name, embed, limits, cookies, work_dir, ffmpeg_dir=None):
+    """yt-dlp params for one track of a tracks-mode spec. Video carries
+    the chapters/metadata postprocessors and the thumbnail; audio is a
+    bare selector; a subtitle by key is a subtitles-only run."""
+    params = base_options(track.url, limits, cookies, ffmpeg_dir)
+    params["outtmpl"] = str(Path(work_dir) / f"{name}.{track.stem()}.%(ext)s")
+
+    if track.kind == "video":
+        embed = set(embed)
+        params["format"] = track.selector
+        params["writethumbnail"] = "thumbnail" in embed
+        params["postprocessors"] = [{
+            "key": "FFmpegMetadata",
+            "add_metadata": "metadata" in embed,
+            "add_chapters": "chapters" in embed,
+        }] if embed & {"metadata", "chapters"} else []
+
+    elif track.kind == "audio":
+        params["format"] = track.selector
+
+    elif track.kind == "subtitle":
+        params["skip_download"] = True
+        params["writesubtitles"] = True
+        params["writeautomaticsub"] = False
+        params["subtitleslangs"] = [track.select]
+
+    return params
+
+
+def is_missing_format(error):
+    """yt-dlp's wording when a selector matches nothing."""
+    return "Requested format is not available" in str(error)
+
+
 def write_ffmpeg_wrappers(directory, nice, ionice):
     """yt-dlp subprocesses ffmpeg for every mux; SAB runs its heavy
     tools under nice and ionice, and a wrapper directory pointed at by

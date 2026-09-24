@@ -11,7 +11,9 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import fetcher, jobs
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
+
+from . import fetcher, jobs, mux, tracks
 from .categories import resolve
 
 log = logging.getLogger(__name__)
@@ -46,6 +48,13 @@ class Pipeline:
         """Fetch and post-process into the work dir. Moves the job to
         WAITING_TO_MOVE on success, FAILED when retries are exhausted,
         or removes it when it was cancelled."""
+        if tracks.is_tracks_spec(job.spec):
+            return self.download_tracks(job)
+
+        return self.download_legacy(job)
+
+    def download_legacy(self, job):
+        """A spec with only format/subs: one yt-dlp run does it all."""
         options = resolve(self.config["categories"], job.category, job.spec)
         work_dir = self.work_dir(job)
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -97,6 +106,201 @@ class Pipeline:
             speed=0.0,
             eta=0,
         )
+
+    # -- tracks mode ---------------------------------------------------
+
+    def download_tracks(self, job):
+        """Fetch every track the spec names, then mux them in order."""
+        options = resolve(self.config["categories"], job.category, job.spec)
+        work_dir = self.work_dir(job)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        name = job.spec["name"]
+
+        try:
+            planned = tracks.plan(job.spec)
+        except tracks.InvalidSpec as error:
+            self.store.update(
+                job.id, state=jobs.FAILED, fail_message=f"invalid spec: {error}",
+                finished=time.time(),
+            )
+            return
+
+        self.store.update(job.id, started=job.started or time.time())
+        totals = {}
+        progress = self._progress_reporter(job, totals)
+        fetched = []
+
+        for track in planned:
+            if job.id in self.cancelled:
+                self.discard(job)
+                return
+
+            try:
+                path = self.fetch_track(track, name, options, work_dir, progress)
+            except fetcher.Cancelled:
+                self.discard(job)
+                return
+            except fetcher.FetchFailed as error:
+                self.fail_or_retry(job, f"{track.kind} {track.index}: {error}")
+                return
+
+            if path is None:
+                log.info("%s: %s %d skipped (optional, nothing matched)", name, track.kind, track.index)
+                continue
+
+            track.path = str(path)
+            fetched.append(track)
+
+        self.store.update(job.id, state=jobs.POSTPROCESSING, speed=0.0, eta=0)
+
+        try:
+            output = self.mux_tracks(fetched, name, options, work_dir)
+        except fetcher.FetchFailed as error:
+            self.fail_or_retry(job, str(error))
+            return
+
+        self.keep_only(work_dir, output, fetched, name, options)
+        self.store.update(
+            job.id, state=jobs.WAITING_TO_MOVE,
+            bytes_done=job.bytes_total or job.bytes_done, speed=0.0, eta=0,
+        )
+
+    def _progress_reporter(self, job, totals):
+        def on_progress(event):
+            filename = event.get("filename", "")
+            totals[filename] = (
+                event.get("downloaded_bytes", 0),
+                event.get("total_bytes") or event.get("total_bytes_estimate") or 0,
+            )
+            self.store.update(
+                job.id,
+                bytes_done=sum(done for done, _ in totals.values()),
+                bytes_total=sum(total for _, total in totals.values()),
+                speed=event.get("speed") or 0.0,
+                eta=event.get("eta") or 0,
+            )
+
+        return on_progress
+
+    def fetch_track(self, track, name, options, work_dir, on_progress):
+        """One track to one file. Returns its path, or None when an
+        optional track matched nothing."""
+        if track.kind == "subtitle" and track.direct_url:
+            return self.fetch_subtitle_url(track, name, work_dir)
+
+        params = fetcher.build_track_options(
+            track, name, options.get("embed", []), self.config["limits"],
+            self.config["cookies"], work_dir, self.ffmpeg_dir,
+        )
+
+        try:
+            fetcher.run(track.url, params, on_progress, lambda event: None, lambda: False)
+        except fetcher.FetchFailed as error:
+            if track.optional and fetcher.is_missing_format(error):
+                return None
+
+            raise
+
+        found = self.produced_file(work_dir, f"{name}.{track.stem()}", track.kind)
+
+        if found is None:
+            if track.optional:
+                return None
+
+            raise fetcher.FetchFailed(f"{track.kind} {track.index}: nothing was written")
+
+        return found
+
+    def fetch_subtitle_url(self, track, name, work_dir):
+        """A subtitle playlist or file, through ffmpeg, to SRT."""
+        output = Path(work_dir) / f"{name}.{track.stem()}.srt"
+        command = [
+            str(self.ffmpeg()), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+            "-user_agent", "Mozilla/5.0", "-i", track.direct_url, str(output),
+        ]
+
+        try:
+            self.run_ffmpeg(command, timeout=600)
+        except fetcher.FetchFailed:
+            if track.optional:
+                return None
+
+            raise
+
+        return output
+
+    def mux_tracks(self, fetched, name, options, work_dir):
+        video = next((t for t in fetched if t.kind == "video"), None)
+
+        if video is None:
+            raise fetcher.FetchFailed("no video track was fetched")
+
+        audio = [t for t in fetched if t.kind == "audio"]
+        subtitles = [t for t in fetched if t.kind == "subtitle"]
+        thumbnail = self.produced_file(work_dir, f"{name}.v", "image")
+        output = Path(work_dir) / f"{name}.{options.get('container', 'mkv')}"
+        wanted_thumbnail = thumbnail if "thumbnail" in set(options.get("embed", [])) else None
+
+        self.run_ffmpeg(
+            mux.arguments(self.ffmpeg(), video, audio, subtitles, output, wanted_thumbnail),
+            timeout=3600,
+        )
+
+        return output
+
+    def keep_only(self, work_dir, output, fetched, name, options):
+        """Drop the per-track intermediates; keep the output and any
+        sidecars asked for."""
+        sidecar = set(options.get("sidecar", []))
+        keep = {output.resolve()}
+
+        if "subs" in sidecar:
+            for track in fetched:
+                if track.kind == "subtitle":
+                    target = Path(work_dir) / mux.sidecar_name(name, track)
+                    shutil.copyfile(track.path, target) if track.path.endswith(".srt") \
+                        else self.run_ffmpeg([str(self.ffmpeg()), "-y", "-nostdin", "-loglevel", "error", "-i", track.path, str(target)], timeout=120)
+                    keep.add(target.resolve())
+
+        if "thumbnail" in sidecar:
+            thumbnail = self.produced_file(work_dir, f"{name}.v", "image")
+
+            if thumbnail:
+                target = Path(work_dir) / f"{name}{thumbnail.suffix}"
+                shutil.move(str(thumbnail), str(target))
+                keep.add(target.resolve())
+
+        for item in Path(work_dir).iterdir():
+            if item.is_file() and item.resolve() not in keep:
+                item.unlink()
+
+    def produced_file(self, work_dir, stem, kind):
+        """The file a track run left behind, by its stem."""
+        candidates = sorted(
+            item for item in Path(work_dir).iterdir()
+            if item.is_file() and item.name.startswith(stem + ".")
+            and not item.name.endswith((".part", ".ytdl"))
+        )
+
+        if kind == "image":
+            candidates = [c for c in candidates if c.suffix.lower() in IMAGE_SUFFIXES]
+        elif kind == "subtitle":
+            candidates = [c for c in candidates if c.suffix.lower() in (".vtt", ".srt", ".ass", ".ttml")]
+        else:
+            candidates = [c for c in candidates if c.suffix.lower() not in IMAGE_SUFFIXES + (".vtt", ".srt", ".ass", ".ttml", ".json", ".description")]
+
+        return candidates[0] if candidates else None
+
+    def ffmpeg(self):
+        return Path(self.ffmpeg_dir) / "ffmpeg" if self.ffmpeg_dir else "ffmpeg"
+
+    def run_ffmpeg(self, command, timeout):
+        """A subprocess boundary the tests replace."""
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+
+        if completed.returncode != 0:
+            tail = (completed.stderr or "").strip().splitlines()[-3:]
+            raise fetcher.FetchFailed("ffmpeg failed: " + " | ".join(tail)[:400])
 
     def fail_or_retry(self, job, message):
         attempts = job.attempts + 1
