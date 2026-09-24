@@ -152,8 +152,8 @@ named category to Sonarr.
 
 ```yaml
 paths:
-  incomplete: /downloads/incomplete   # fast local disk
-  complete: /downloads/complete       # final library storage
+  incomplete: /config/Downloads/incomplete   # under the config mount
+  complete: /downloads/complete              # final library storage
 schedule:
   timezone: UTC                       # defaults to $TZ when set
   download:
@@ -236,12 +236,10 @@ services:
 - `paths.complete` must be visible to Sonarr at the same path, or
   mapped with a remote path mapping - exactly as with SAB. Mounting
   the same library volume Sonarr mounts is the simplest way.
-- `paths.incomplete` defaults to `/downloads/incomplete` inside the
-  container and is left in the container's own layer, which is on the
-  host's disk. Anything mid-download or waiting for its move window is
-  lost when the container is recreated - and watchtower recreates it
-  on every image update; on restart the worker requeues those jobs.
-  Mount a host directory there if you'd rather keep them.
+- `paths.incomplete` defaults to `/config/Downloads/incomplete` - under
+  the config mount, as SAB does it - so in-flight and waiting jobs
+  survive a recreate without a mount of their own. Point it elsewhere
+  (a faster disk) with `YTDLPARR_PATHS_INCOMPLETE` if you like.
 - The config file is `/config/config.yml`. It is needed for anything
   that is a table - categories, schedule windows, cookies - because
   those cannot come from the environment. A minimal one:

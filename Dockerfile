@@ -15,12 +15,10 @@ RUN apk add --no-cache ffmpeg python3 py3-pip tzdata \
 WORKDIR /app
 COPY ytdlparr ./ytdlparr
 
-# The incomplete dir is meant to live in the container's own layer
-# unless the deployment mounts something over it, so it is not a
-# VOLUME (that would spawn an anonymous volume per recreate) and it is
-# writable by whatever uid the container is run as.
-RUN mkdir -p /downloads/incomplete /downloads/complete \
- && chmod 0777 /downloads /downloads/incomplete /downloads/complete
+# /downloads is not a VOLUME: that would spawn an anonymous volume per
+# recreate. Incomplete files live under /config by default (SAB's
+# convention), so nothing needs mounting for them.
+RUN mkdir -p /downloads/complete && chmod 0777 /downloads /downloads/complete
 
 ENV YTDLPARR_CONFIG=/config/config.yml
 VOLUME ["/config"]

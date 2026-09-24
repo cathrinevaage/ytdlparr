@@ -17,7 +17,7 @@ DEFAULTS = {
         "url_base": "",
     },
     "paths": {
-        "incomplete": "/downloads/incomplete",
+        "incomplete": "/config/Downloads/incomplete",   # SAB's convention: under config
         "complete": "/downloads/complete",
         "state": "/config/jobs.json",
     },

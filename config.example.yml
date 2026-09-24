@@ -5,8 +5,8 @@ server:
   url_base: ""
 
 paths:
-  incomplete: /downloads/incomplete   # fast local disk
-  complete: /downloads/complete       # final library storage
+  incomplete: /config/Downloads/incomplete   # under the config mount, like SAB
+  complete: /downloads/complete              # final library storage
   state: /config/jobs.json
 
 limits:
