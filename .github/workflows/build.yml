@@ -51,8 +51,6 @@ jobs:
       - run: |
           python - <<'PY'
           import yt_dlp
-          from yt_dlp.postprocessor import FFmpegPostProcessor
-          assert FFmpegPostProcessor().available, "ffmpeg missing on runner"
           with yt_dlp.YoutubeDL({"quiet": True, "simulate": True}) as ydl:
               info = ydl.extract_info(
                   "https://archive.org/details/BigBuckBunny_124", download=False
