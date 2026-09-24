@@ -2,6 +2,8 @@ import logging
 import os
 from pathlib import Path
 
+from waitress import serve
+
 from .app import create_app
 from .config import load
 from .fetcher import write_ffmpeg_wrappers
@@ -38,10 +40,11 @@ def main():
     worker.start()
 
     try:
-        app.run(
+        serve(
+            app,
             host=config["server"]["host"],
             port=config["server"]["port"],
-            threaded=True,
+            threads=8,
         )
     finally:
         worker.stop()

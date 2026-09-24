@@ -5,9 +5,12 @@ FROM alpine:3.20
 # release that passed its smoke test, and the tag records it.
 ARG YTDLP_VERSION=2026.8.19
 
-RUN apk add --no-cache ffmpeg python3 py3-pip \
+# tzdata: TZ names nothing without the zone database, and the schedule
+# windows resolve it through zoneinfo.
+RUN apk add --no-cache ffmpeg python3 py3-pip tzdata \
  && pip install --break-system-packages --no-cache-dir \
-      "flask>=3.0" "pyyaml>=6.0" "apprise>=1.9" "yt-dlp==${YTDLP_VERSION}"
+      "flask>=3.0" "pyyaml>=6.0" "apprise>=1.9" "waitress>=3.0" \
+      "yt-dlp==${YTDLP_VERSION}"
 
 WORKDIR /app
 COPY ytdlparr ./ytdlparr
