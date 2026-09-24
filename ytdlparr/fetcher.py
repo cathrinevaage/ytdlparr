@@ -3,6 +3,7 @@ options, runs it, and reports progress back through the hooks."""
 
 import logging
 import os
+import shutil
 import stat
 from pathlib import Path
 from urllib.parse import urlparse
@@ -131,26 +132,32 @@ def build_options(spec, options, limits, cookies, work_dir, ffmpeg_dir=None):
 def write_ffmpeg_wrappers(directory, nice, ionice):
     """yt-dlp subprocesses ffmpeg for every mux; SAB runs its heavy
     tools under nice and ionice, and a wrapper directory pointed at by
-    ffmpeg_location is how the same applies here. ionice is Linux
-    only, so the wrapper skips it where it does not exist."""
+    ffmpeg_location is how the same applies here. The real binaries
+    are resolved now and written in as absolute paths, so the scripts
+    never look themselves up. ionice is Linux only and is used only
+    where it exists."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
 
     ionice_class, _, ionice_level = str(ionice or "").partition(":")
-    ionice_call = (
-        f"command -v ionice >/dev/null 2>&1 && "
-        f"set -- ionice -c {ionice_class} -n {ionice_level or 4} \"$@\"\n"
+    ionice_prefix = (
+        f"ionice -c {int(ionice_class)} -n {int(ionice_level or 4)} "
         if ionice_class else ""
     )
+    nice_prefix = f"nice -n {int(nice or 0)} "
 
     for tool in ("ffmpeg", "ffprobe"):
+        real = shutil.which(tool) or f"/usr/bin/{tool}"
         script = directory / tool
         script.write_text(
             "#!/bin/sh\n"
-            f"{ionice_call}"
-            f"exec nice -n {int(nice or 0)} "
-            f"\"$(command -v {tool} 2>/dev/null || echo /usr/bin/{tool})\" "
-            "\"$@\"\n"
+            + (
+                "if command -v ionice >/dev/null 2>&1; then\n"
+                f'  exec {nice_prefix}{ionice_prefix}"{real}" "$@"\n'
+                "fi\n"
+                if ionice_prefix else ""
+            )
+            + f'exec {nice_prefix}"{real}" "$@"\n'
         )
         script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
 
