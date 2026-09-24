@@ -1,0 +1,70 @@
+server:
+  host: 0.0.0.0
+  port: 9120
+  api_key: changeme
+  url_base: ""
+
+paths:
+  incomplete: /downloads/incomplete   # fast local disk
+  complete: /downloads/complete       # final library storage
+  state: /config/jobs.json
+
+limits:
+  max_concurrent: 2
+  rate_limit: ""                      # yt-dlp -r, e.g. "5M"
+  retries: 5
+  retry_backoff: 30                   # seconds, doubling
+  nice: 10
+  ionice: "2:4"
+  pause_downloads_during_postprocess: true
+
+disk:
+  min_free_incomplete: 20G
+  min_free_complete: 50G
+  on_low_space: fail                  # or "pause"
+
+schedule:
+  timezone: UTC                       # defaults to $TZ when set
+  download:
+    - { days: [mon,tue,wed,thu,fri,sat,sun], from: "00:00", to: "24:00" }
+  move:                               # the noisy one - writing to the library disks
+    - { days: [mon,tue,wed,thu,fri], from: "09:00", to: "23:00" }
+    - { days: [sat,sun], from: "10:00", to: "23:00" }
+
+history:
+  keep_jobs: 200
+
+cleanup:                              # swept after processing
+  - "*.description"
+  - "*.info.json"
+  - "*.jpg"
+
+permissions:
+  chmod: ""                           # empty = don't force
+  chown: ""
+
+cookies:                              # per host, optional
+  # www.youtube.com: /config/cookies/youtube.txt
+
+categories:
+  "*":
+    dir: ""
+    format: "bestvideo+bestaudio/best"
+    container: mkv
+    subs: [all]
+    embed: [subs, chapters, thumbnail, metadata]
+    sidecar: []
+    sponsorblock: []
+    priority: normal
+  tv:
+    dir: tv
+  tv-example:                         # one per indexer that needs its own options
+    dir: tv
+    format: "bestvideo[height<=1080]+bestaudio/best"
+    subs: [en]
+  movies:
+    dir: movies
+
+notifications:
+  apprise_urls: []
+  on: [job_failed, low_space, queue_paused]
