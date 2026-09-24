@@ -44,6 +44,7 @@ class Job:
     speed: float = 0.0            # bytes per second, from yt-dlp
     eta: int = 0                  # seconds, from yt-dlp
     attempts: int = 0
+    work_dir: str = ""            # where it downloads, chosen on first use
     storage: str = ""             # the final path Sonarr imports from
     fail_message: str = ""
 

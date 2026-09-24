@@ -13,6 +13,13 @@ from pathlib import Path
 
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 
+
+def safe_directory_name(name):
+    """A job name as a single path component."""
+    cleaned = name.replace("/", "-").replace("\\", "-").strip().lstrip(".")
+
+    return cleaned or "job"
+
 from . import fetcher, jobs, mux, tracks
 from .categories import resolve
 
@@ -29,7 +36,25 @@ class Pipeline:
     # -- paths ---------------------------------------------------------
 
     def work_dir(self, job):
-        return Path(self.config["paths"]["incomplete"]) / job.id
+        """<incomplete>/<job name>, SAB's convention; the id is added
+        only when another job already holds that name. Chosen once and
+        remembered on the job, so a rename never strands files. Jobs
+        from before this naming keep their id-named directory."""
+        if job.work_dir:
+            return Path(job.work_dir)
+
+        incomplete = Path(self.config["paths"]["incomplete"])
+        legacy = incomplete / job.id
+        chosen = incomplete / safe_directory_name(job.name)
+
+        if legacy.exists():
+            chosen = legacy
+        elif chosen.exists():
+            chosen = incomplete / f"{safe_directory_name(job.name)} [{job.id[-6:]}]"
+
+        self.store.update(job.id, work_dir=str(chosen))
+
+        return chosen
 
     def destination(self, job):
         """<complete>/<category dir>/<job name>/ - SAB's layout, and

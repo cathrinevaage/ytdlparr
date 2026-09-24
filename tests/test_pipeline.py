@@ -99,3 +99,38 @@ class PipelineTest(unittest.TestCase):
 
         self.assertEqual(job.state, jobs.FAILED)
         self.assertIn("move failed", job.fail_message)
+
+
+class WorkDirTest(unittest.TestCase):
+    def setUp(self):
+        self.harness = Harness()
+
+    def tearDown(self):
+        self.harness.close()
+
+    def test_named_after_the_job_and_remembered(self):
+        job = self.harness.store.get(self.harness.addfile(name="Show - S01E01 - Pilot")["nzo_ids"][0])
+
+        path = self.harness.pipeline.work_dir(job)
+
+        self.assertEqual(path.name, "Show - S01E01 - Pilot")
+        self.assertEqual(job.work_dir, str(path))
+
+    def test_a_second_job_with_the_same_name_gets_the_id_suffix(self):
+        first = self.harness.store.get(self.harness.addfile(name="Same")["nzo_ids"][0])
+        second = self.harness.store.get(self.harness.addfile(name="Same")["nzo_ids"][0])
+        self.harness.pipeline.work_dir(first).mkdir(parents=True)
+
+        self.assertEqual(self.harness.pipeline.work_dir(second).name, f"Same [{second.id[-6:]}]")
+
+    def test_a_job_from_before_keeps_its_id_directory(self):
+        job = self.harness.store.get(self.harness.addfile(name="Old")["nzo_ids"][0])
+        legacy = Path(self.harness.config["paths"]["incomplete"]) / job.id
+        legacy.mkdir(parents=True)
+
+        self.assertEqual(self.harness.pipeline.work_dir(job), legacy)
+
+    def test_slashes_cannot_escape_the_incomplete_dir(self):
+        job = self.harness.store.get(self.harness.addfile(name="../evil/../x")["nzo_ids"][0])
+
+        self.assertEqual(self.harness.pipeline.work_dir(job).parent, Path(self.harness.config["paths"]["incomplete"]))
