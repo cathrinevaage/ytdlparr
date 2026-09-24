@@ -209,17 +209,16 @@ that means:
 - a job spec from nrkarr arrives at SABnzbd, which accepts a file with
   no articles and fails it.
 
-So, on **every** usenet indexer in Settings → Indexers:
+Two rules, one per direction:
 
-| indexer | Download Client |
+| | how |
 |---|---|
-| nrkarr (and any other spec-producing indexer) | **ytdlparr** |
-| every real usenet indexer | **your real client** |
+| spec-producing indexers (nrkarr, …) → ytdlparr | **pin** each one's Download Client to ytdlparr. Nothing else can do this: priority cannot know that only one client understands the spec. |
+| real usenet indexers → your real client | **priority**: give the real client a higher Client Priority (lower number) than ytdlparr. Sonarr picks from the top-priority group and round-robins only within it, so unpinned indexers always land on the real client. Pinning each one works too, but is not required. |
 
-Never "Any" on either side. Giving ytdlparr a lower client priority
-than the real client is a backstop only - Sonarr still falls through
-to it when the preferred client is unavailable - and does not replace
-pinning.
+The one edge in the priority route: after repeated failures Sonarr
+temporarily blocks a client, and grabs then fall to the next priority
+- ytdlparr - which refuses them until the block lifts.
 
 ytdlparr's side of this is to fail loudly: anything without a
 `ytdlpspec` meta tag is rejected at `addfile`, never queued, so a
