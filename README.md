@@ -170,6 +170,44 @@ Settings → Download Clients → Add → SABnzbd:
 | Host / Port | `ytdlparr` / `9120` |
 | API Key | `server.api_key` |
 | Category | one of your named categories, e.g. `tv-example` |
+| Client Priority | lower than your real usenet client (higher number) |
+
+### Routing: only job specs must reach ytdlparr
+
+To Sonarr and Radarr, ytdlparr is just another usenet client. That is
+the point of the SABnzbd façade - and it is also the trap. **Nothing
+in Sonarr or Radarr knows that ytdlparr can only handle job specs and
+your real client can only handle real NZBs.** You tell them, per
+indexer, or they will mix the two.
+
+When an indexer's **Download Client** is left on "Any", grabs from it
+are spread across *every* enabled usenet client - clients of equal
+priority are used round-robin. With ytdlparr and SABnzbd both enabled
+that means:
+
+- a real NZB from your usenet indexer arrives at ytdlparr, which
+  refuses it at `addfile` (`not a job spec`). Sonarr records a failed
+  grab for a perfectly good release, and after enough of those it
+  blocklists it;
+- a job spec from nrkarr arrives at SABnzbd, which accepts a file with
+  no articles and fails it.
+
+So, on **every** usenet indexer in Settings → Indexers:
+
+| indexer | Download Client |
+|---|---|
+| nrkarr (and any other spec-producing indexer) | **ytdlparr** |
+| every real usenet indexer | **your real client** |
+
+Never "Any" on either side. Giving ytdlparr a lower client priority
+than the real client is a backstop only - Sonarr still falls through
+to it when the preferred client is unavailable - and does not replace
+pinning.
+
+ytdlparr's side of this is to fail loudly: anything without a
+`ytdlpspec` meta tag is rejected at `addfile`, never queued, so a
+misrouted NZB shows up as a refused grab in Sonarr's log rather than a
+silent stall.
 
 ## What Sonarr sees
 
