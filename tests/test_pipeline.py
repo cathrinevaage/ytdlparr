@@ -119,9 +119,15 @@ class WorkDirTest(unittest.TestCase):
     def test_a_second_job_with_the_same_name_gets_the_id_suffix(self):
         first = self.harness.store.get(self.harness.addfile(name="Same")["nzo_ids"][0])
         second = self.harness.store.get(self.harness.addfile(name="Same")["nzo_ids"][0])
-        self.harness.pipeline.work_dir(first).mkdir(parents=True)
+        self.harness.pipeline.work_dir(first)
 
         self.assertEqual(self.harness.pipeline.work_dir(second).name, f"Same [{second.id[-6:]}]")
+
+    def test_a_directory_renamed_by_hand_is_adopted_not_suffixed(self):
+        job = self.harness.store.get(self.harness.addfile(name="Renamed")["nzo_ids"][0])
+        (Path(self.harness.config["paths"]["incomplete"]) / "Renamed").mkdir(parents=True)
+
+        self.assertEqual(self.harness.pipeline.work_dir(job).name, "Renamed")
 
     def test_a_job_from_before_keeps_its_id_directory(self):
         job = self.harness.store.get(self.harness.addfile(name="Old")["nzo_ids"][0])

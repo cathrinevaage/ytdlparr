@@ -47,9 +47,14 @@ class Pipeline:
         legacy = incomplete / job.id
         chosen = incomplete / safe_directory_name(job.name)
 
+        taken = {
+            other.work_dir for other in self.store.jobs.values()
+            if other.id != job.id and other.work_dir
+        }
+
         if legacy.exists():
             chosen = legacy
-        elif chosen.exists():
+        elif str(chosen) in taken:
             chosen = incomplete / f"{safe_directory_name(job.name)} [{job.id[-6:]}]"
 
         self.store.update(job.id, work_dir=str(chosen))
